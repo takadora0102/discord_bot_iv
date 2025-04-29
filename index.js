@@ -6,7 +6,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 const DATA_FILE = './data.json';
 
-// --- Expressサーバー起動（Render用） ---
+// --- Expressサーバー（Render用） ---
 app.get('/', (req, res) => {
   res.send('Bot is running!');
 });
@@ -14,7 +14,7 @@ app.listen(port, () => {
   console.log(`Server is listening on port ${port}`);
 });
 
-// --- JSONファイル読み書き関数 ---
+// --- JSON読み書き ---
 function loadData() {
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE));
@@ -27,7 +27,7 @@ function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-// --- Discord Bot設定 ---
+// --- Discord BOTクライアント ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -40,18 +40,11 @@ client.once(Events.ClientReady, c => {
   console.log(`Bot is ready! Logged in as ${c.user.tag}`);
 });
 
-// --- Slash Command 処理 ---
+// --- コマンド処理 ---
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  // --- /calculate コマンド（テスト用） ---
-  if (interaction.commandName === 'calculate') {
-    const inputValue = interaction.options.getNumber('value');
-    const result = inputValue * 2;
-    await interaction.reply(`計算結果は「${result}」です！`);
-  }
-
-  // --- /register コマンド ---
+  // /register
   if (interaction.commandName === 'register') {
     const winRate = interaction.options.getNumber('win_rate');
     const matches = interaction.options.getInteger('matches');
@@ -76,7 +69,7 @@ client.on(Events.InteractionCreate, async interaction => {
     });
   }
 
-  // --- /record コマンド ---
+  // /record
   if (interaction.commandName === 'record') {
     const winsToday = interaction.options.getInteger('wins_today');
     const lossesToday = interaction.options.getInteger('losses_today');
@@ -95,14 +88,12 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
-    // 戦績を更新
     userData.W += winsToday;
     userData.L += lossesToday;
     userData.D += drawsToday;
     userData.M = userData.W + userData.L + userData.D;
     userData.P = userData.W / (userData.W + userData.L);
 
-    // 必要勝利数の計算
     function calcNeededWins(goalWinRate) {
       const W = userData.W;
       const L = userData.L;
@@ -118,18 +109,57 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.reply({
       content: `✅ 戦績を更新しました！\n\n`
-             + `📝 現在の成績:\n`
-             + `勝ち: ${userData.W}\n負け: ${userData.L}\n引き分け: ${userData.D}\n合計試合数: ${userData.M}\n勝率: ${(userData.P * 100).toFixed(2)}%\n\n`
-             + `🎯 目標勝率 ${goalWinRate1 * 100}% に必要な追加勝利数: ${neededWins1}\n`
-             + `🎯 目標勝率 ${goalWinRate2 * 100}% に必要な追加勝利数: ${neededWins2}`,
+        + `📝 現在の成績:\n`
+        + `勝ち: ${userData.W}\n負け: ${userData.L}\n引き分け: ${userData.D}\n合計試合数: ${userData.M}\n勝率: ${(userData.P * 100).toFixed(2)}%\n\n`
+        + `🎯 目標勝率 ${goalWinRate1 * 100}% に必要な追加勝利数: ${neededWins1}\n`
+        + `🎯 目標勝率 ${goalWinRate2 * 100}% に必要な追加勝利数: ${neededWins2}`,
+      ephemeral: true
+    });
+  }
+
+  // /profile
+  if (interaction.commandName === 'profile') {
+    const data = loadData();
+    const userData = data[interaction.user.id];
+
+    if (!userData) {
+      await interaction.reply({
+        content: '⚠️ 戦績データが登録されていません。\nまず /register で初期登録をしてください！',
+        ephemeral: true
+      });
+      return;
+    }
+
+    await interaction.reply({
+      content: `📊 あなたの戦績：\n`
+        + `勝ち: ${userData.W}\n負け: ${userData.L}\n引き分け: ${userData.D}\n合計: ${userData.M}\n勝率: ${(userData.P * 100).toFixed(2)}%`,
+      ephemeral: true
+    });
+  }
+
+  // /reset
+  if (interaction.commandName === 'reset') {
+    const data = loadData();
+
+    if (!data[interaction.user.id]) {
+      await interaction.reply({
+        content: '⚠️ あなたの戦績データは存在しません。',
+        ephemeral: true
+      });
+      return;
+    }
+
+    delete data[interaction.user.id];
+    saveData(data);
+
+    await interaction.reply({
+      content: '🗑️ あなたの戦績データをリセットしました。',
       ephemeral: true
     });
   }
 });
 
-// --- Discordログイン ---
+// --- Discordログイン & エラーハンドリング ---
 client.login(process.env.BOT_TOKEN);
-
-// --- エラーハンドリング ---
 client.on('error', console.error);
 process.on('unhandledRejection', console.error);
