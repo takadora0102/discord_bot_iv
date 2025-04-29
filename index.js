@@ -1,6 +1,7 @@
 const express = require('express');
 const { Client, GatewayIntentBits, Events } = require('discord.js');
 const fs = require('fs');
+const cron = require('node-cron'); // ← 追加
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -46,10 +47,12 @@ client.once(Events.ClientReady, c => {
   console.log(`Bot is ready! Logged in as ${c.user.tag}`);
 });
 
+// Slashコマンドの処理
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
   const data = loadData();
   const userId = interaction.user.id;
+
   if (interaction.commandName === 'register') {
     const winRate = interaction.options.getNumber('win_rate');
     const matches = interaction.options.getInteger('matches');
@@ -176,6 +179,25 @@ client.on(Events.InteractionCreate, async interaction => {
       content: `✅ 毎日 ${hour}:00 に ${channel.name} で通知を送るよう設定しました！`,
       ephemeral: true
     });
+  }
+});
+
+// ✅ cron: 毎分通知チェック（ユーザーの設定と一致したら通知）
+cron.schedule('* * * * *', async () => {
+  const now = new Date();
+  const currentHour = now.getHours();
+  const reminderData = loadReminderData();
+
+  for (const userId in reminderData) {
+    const { hour, channelId } = reminderData[userId];
+    if (hour === currentHour) {
+      try {
+        const channel = await client.channels.fetch(channelId);
+        await channel.send(`<@${userId}> 今日の戦績を記録しよう！📝\n/record を忘れずに！`);
+      } catch (err) {
+        console.error(`⚠️ 通知エラー（user: ${userId}）：`, err);
+      }
+    }
   }
 });
 
