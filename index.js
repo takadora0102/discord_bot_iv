@@ -40,22 +40,46 @@ client.once(Events.ClientReady, c => {
   console.log(`Bot is ready! Logged in as ${c.user.tag}`);
 });
 
-// --- Slash Command 実装予定箇所（例: register, record） ---
+// --- Slash Command実装部分 ---
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
+  // 既存の calculate コマンド
   if (interaction.commandName === 'calculate') {
     const inputValue = interaction.options.getNumber('value');
     const result = inputValue * 2;
     await interaction.reply(`計算結果は「${result}」です！`);
   }
 
-  // 👇 register コマンドや record コマンドはここに追加予定！
+  // 新規 register コマンド
+  if (interaction.commandName === 'register') {
+    const winRate = interaction.options.getNumber('win_rate');
+    const matches = interaction.options.getInteger('matches');
+    const wins = interaction.options.getInteger('wins');
+
+    const losses = wins * (1 - winRate) / winRate;
+    const draws = matches - wins - losses;
+
+    const data = loadData();
+    data[interaction.user.id] = {
+      W: wins,
+      L: losses,
+      D: draws,
+      M: matches,
+      P: winRate
+    };
+    saveData(data);
+
+    await interaction.reply({
+      content: `✅ 登録しました！\n勝率: ${winRate}\n勝: ${wins} 負: ${losses.toFixed(2)} 分: ${draws.toFixed(2)}\n合計: ${matches}`,
+      ephemeral: true
+    });
+  }
 });
 
 // --- Discordログイン ---
 client.login(process.env.BOT_TOKEN);
 
-// --- エラー補足 ---
+// --- エラーハンドリング ---
 client.on('error', console.error);
 process.on('unhandledRejection', console.error);
