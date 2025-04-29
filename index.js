@@ -1,7 +1,7 @@
 const express = require('express');
-const { Client, GatewayIntentBits, Events } = require('discord.js');
+const { Client, GatewayIntentBits, Events, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const fs = require('fs');
-const cron = require('node-cron'); // ← 追加
+const cron = require('node-cron');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -10,29 +10,25 @@ app.listen(port, () => console.log(`Server running on port ${port}`));
 
 const DATA_FILE = './data.json';
 const REMINDER_FILE = './reminder.json';
+const RANK_REMINDER_FILE = './rank_reminder.json';
 
 function loadData() {
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE));
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(fs.readFileSync(DATA_FILE)); } catch { return {}; }
 }
-
 function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
-
 function loadReminderData() {
-  try {
-    return JSON.parse(fs.readFileSync(REMINDER_FILE));
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(fs.readFileSync(REMINDER_FILE)); } catch { return {}; }
 }
-
 function saveReminderData(data) {
   fs.writeFileSync(REMINDER_FILE, JSON.stringify(data, null, 2));
+}
+function loadRankReminderData() {
+  try { return JSON.parse(fs.readFileSync(RANK_REMINDER_FILE)); } catch { return {}; }
+}
+function saveRankReminderData(data) {
+  fs.writeFileSync(RANK_REMINDER_FILE, JSON.stringify(data, null, 2));
 }
 
 const client = new Client({
@@ -46,8 +42,6 @@ const client = new Client({
 client.once(Events.ClientReady, c => {
   console.log(`Bot is ready! Logged in as ${c.user.tag}`);
 });
-
-// Slashコマンドの処理
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
   const data = loadData();
@@ -141,7 +135,8 @@ client.on(Events.InteractionCreate, async interaction => {
         "`/profile` - 自分の戦績を表示\n" +
         "`/reset` - 自分の戦績をリセット\n" +
         "`/help` - コマンド一覧を表示\n" +
-        "`/remindset` - リマインダーの時間とチャンネルを設定（-1で通知OFF）",
+        "`/remindset` - 戦績リマインダーの設定\n" +
+        "`/rankremindset` - ランクマ参加確認リマインダーの設定",
       ephemeral: true
     });
   }
@@ -155,7 +150,7 @@ client.on(Events.InteractionCreate, async interaction => {
       delete reminderData[userId];
       saveReminderData(reminderData);
       await interaction.reply({
-        content: '🔕 リマインダー通知を無効化しました。',
+        content: '🔕 戦績リマインダー通知を無効化しました。',
         ephemeral: true
       });
       return;
@@ -176,18 +171,53 @@ client.on(Events.InteractionCreate, async interaction => {
     saveReminderData(reminderData);
 
     await interaction.reply({
-      content: `✅ 毎日 ${hour}:00 に ${channel.name} で通知を送るよう設定しました！`,
+      content: `✅ 毎日 ${hour}:00 に ${channel.name} で戦績リマインダー通知を送信します！`,
+      ephemeral: true
+    });
+  }
+
+  else if (interaction.commandName === 'rankremindset') {
+    const hour = interaction.options.getInteger('hour');
+    const channel = interaction.options.getChannel('channel') || interaction.channel;
+    const rankReminderData = loadRankReminderData();
+
+    if (hour === -1) {
+      delete rankReminderData[userId];
+      saveRankReminderData(rankReminderData);
+      await interaction.reply({
+        content: '🔕 ランクマリマインダー通知を無効化しました。',
+        ephemeral: true
+      });
+      return;
+    }
+
+    if (hour < 0 || hour > 23) {
+      await interaction.reply({
+        content: '⚠️ 時間は 0～23 または -1（通知OFF）で指定してください。',
+        ephemeral: true
+      });
+      return;
+    }
+
+    rankReminderData[userId] = {
+      hour,
+      channelId: channel.id
+    };
+    saveRankReminderData(rankReminderData);
+
+    await interaction.reply({
+      content: `✅ 毎日 ${hour}:00 に ${channel.name} でランクマ参加アンケートを送信します！`,
       ephemeral: true
     });
   }
 });
-
-// ✅ cron: 毎分通知チェック（ユーザーの設定と一致したら通知）
+// ⏰ 毎分チェックして通知を送信するcron
 cron.schedule('* * * * *', async () => {
   const now = new Date();
   const currentHour = now.getHours();
-  const reminderData = loadReminderData();
 
+  // 戦績リマインダー送信
+  const reminderData = loadReminderData();
   for (const userId in reminderData) {
     const { hour, channelId } = reminderData[userId];
     if (hour === currentHour) {
@@ -195,7 +225,39 @@ cron.schedule('* * * * *', async () => {
         const channel = await client.channels.fetch(channelId);
         await channel.send(`<@${userId}> 今日の戦績を記録しよう！📝\n/record を忘れずに！`);
       } catch (err) {
-        console.error(`⚠️ 通知エラー（user: ${userId}）：`, err);
+        console.error(`⚠️ 通知エラー（戦績 user: ${userId}）：`, err);
+      }
+    }
+  }
+
+  // ランクマリマインダー送信
+  const rankReminderData = loadRankReminderData();
+  for (const userId in rankReminderData) {
+    const { hour, channelId } = rankReminderData[userId];
+    if (hour === currentHour) {
+      try {
+        const channel = await client.channels.fetch(channelId);
+
+        // ボタン作成
+        const row = new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId('rank参加')
+              .setLabel('✅ 参加')
+              .setStyle(ButtonStyle.Success),
+            new ButtonBuilder()
+              .setCustomId('rank不参加')
+              .setLabel('❌ 不参加')
+              .setStyle(ButtonStyle.Danger)
+          );
+
+        await channel.send({
+          content: `<@${userId}> 本日のランクマに参加しますか？`,
+          components: [row]
+        });
+
+      } catch (err) {
+        console.error(`⚠️ 通知エラー（ランクマ user: ${userId}）：`, err);
       }
     }
   }
