@@ -86,7 +86,7 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 cron.schedule('* * * * *', async () => {
   const now = new Date();
-  const hour = now.getHours(); // JST補正なしに修正
+  const hour = (now.getHours() + 9) % 24; // JSTに合わせる
   const minute = now.getMinutes();
   console.log(`⏰ cron 実行: 現在 ${hour}:${minute}`);
 
