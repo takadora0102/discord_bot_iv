@@ -11,7 +11,6 @@ app.listen(port, () => console.log(`Server running on port ${port}`));
 const DATA_FILE = './data.json';
 const REMINDER_FILE = './reminder.json';
 const RANK_REMINDER_FILE = './rank_reminder.json';
-const RANK_STATUS_FILE = './rank_status.json';
 
 function loadJSON(path) {
   try {
@@ -29,28 +28,15 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, c => {
-  console.log(`Bot is ready! Logged in as ${c.user.tag}`);
+  console.log(`✅ Bot is ready! Logged in as ${c.user.tag}`);
 });
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
+
   const data = loadJSON(DATA_FILE);
   const userId = interaction.user.id;
 
-  if (interaction.commandName === 'register') {
-    const winRate = interaction.options.getNumber('win_rate');
-    const matches = interaction.options.getInteger('matches');
-    const wins = interaction.options.getInteger('wins');
-    const losses = wins * (1 - winRate) / winRate;
-    const draws = matches - wins - losses;
-    data[userId] = { W: wins, L: losses, D: draws, M: matches, P: winRate };
-    saveJSON(DATA_FILE, data);
-    await interaction.reply({
-      content: `✅ 登録しました！\n勝率: ${winRate}\n勝: ${wins} 負: ${losses.toFixed(2)} 分: ${draws.toFixed(2)}\n合計: ${matches}`,
-      ephemeral: true
-    });
-  }
-
-  else if (interaction.commandName === 'remindset') {
+  if (interaction.commandName === 'remindset') {
     const hour = interaction.options.getInteger('hour');
     const channel = interaction.options.getChannel('channel') || interaction.channel;
     const reminders = loadJSON(REMINDER_FILE);
@@ -58,12 +44,13 @@ client.on(Events.InteractionCreate, async interaction => {
     if (hour === -1) {
       delete reminders[userId];
       saveJSON(REMINDER_FILE, reminders);
+      console.log(`🗑️ remindset: ${userId} の通知を無効化`);
       await interaction.reply({ content: '🔕 戦績リマインダー通知を無効化しました。', ephemeral: true });
       return;
     }
 
     reminders[userId] = { hour: (hour - 9 + 24) % 24, channelId: channel.id };
-    console.log("✅ /remindset 保存直前データ:", reminders);  // ← ログ追加！
+    console.log(`✅ remindset 登録: ${userId} → ${hour}:00 JST（内部: ${(hour - 9 + 24) % 24} UTC）`);
     saveJSON(REMINDER_FILE, reminders);
     await interaction.reply({
       content: `✅ 毎日 ${hour}:00 に ${channel.name} で戦績リマインダー通知を送信します！`,
@@ -79,83 +66,53 @@ client.on(Events.InteractionCreate, async interaction => {
     if (hour === -1) {
       delete ranks[userId];
       saveJSON(RANK_REMINDER_FILE, ranks);
+      console.log(`🗑️ rankremindset: ${userId} の通知を無効化`);
       await interaction.reply({ content: '🔕 ランクマリマインダー通知を無効化しました。', ephemeral: true });
       return;
     }
 
-    ranks[userId] = { hour: (hour - 9 + 24) % 24, channelId: channel.id, sentToday: false };
-    console.log("✅ /rankremindset 保存直前データ:", ranks);  // ← ログ追加！
+    ranks[userId] = {
+      hour: (hour - 9 + 24) % 24,
+      channelId: channel.id,
+      sentToday: false
+    };
+    console.log(`✅ rankremindset 登録: ${userId} → ${hour}:00 JST（内部: ${(hour - 9 + 24) % 24} UTC）`);
     saveJSON(RANK_REMINDER_FILE, ranks);
     await interaction.reply({
       content: `✅ 毎日 ${hour}:00 に ${channel.name} でランクマ参加アンケートを送信します！`,
       ephemeral: true
     });
   }
-
-  else if (interaction.commandName === 'help') {
-    await interaction.reply({
-      content:
-        "**📖 使えるコマンド一覧**\n\n" +
-        "`/register` - 初期戦績を登録します\n" +
-        "`/record` - 今日の戦績を追加し、目標勝率に必要な勝利数を計算\n" +
-        "`/profile` - 自分の戦績を表示\n" +
-        "`/reset` - 自分の戦績をリセット\n" +
-        "`/help` - コマンド一覧を表示\n" +
-        "`/remindset` - 戦績リマインダーの設定（個人メンション）\n" +
-        "`/rankremindset` - ランクマ参加アンケートの設定（@everyone、3時間後に集計）",
-      ephemeral: true
-    });
-  }
 });
-// 🔁 ボタンの応答保存用
-const participationMap = new Map();
-
-client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isButton()) return;
-  const userId = interaction.user.id;
-  const choice = interaction.customId; // 'rank参加' or 'rank不参加'
-
-  if (!participationMap.has(interaction.message.id)) {
-    participationMap.set(interaction.message.id, { yes: new Set(), no: new Set() });
-  }
-
-  const record = participationMap.get(interaction.message.id);
-  if (choice === 'rank参加') {
-    record.yes.add(userId);
-    record.no.delete(userId);
-  } else {
-    record.no.add(userId);
-    record.yes.delete(userId);
-  }
-
-  await interaction.reply({ content: `✅ 「${choice === 'rank参加' ? '参加' : '不参加'}」として記録しました！`, ephemeral: true });
-});
-
 cron.schedule('* * * * *', async () => {
   const now = new Date();
-  const hour = now.getHours();
+  const hour = now.getHours(); // JST補正なしに修正
   const minute = now.getMinutes();
+  console.log(`⏰ cron 実行: 現在 ${hour}:${minute}`);
 
-  // 戦績リマインダー
   const reminders = loadJSON(REMINDER_FILE);
   for (const userId in reminders) {
     const { hour: targetHour, channelId } = reminders[userId];
+    console.log(`🔍 remind チェック: user=${userId} 設定=${targetHour}`);
+
     if (hour === targetHour && minute === 0) {
       try {
         const channel = await client.channels.fetch(channelId);
         await channel.send(`<@${userId}> 今日の戦績を記録しよう！📝\n/record を忘れずに！`);
+        console.log(`✅ remind 通知送信成功: user=${userId} → channel=${channelId}`);
       } catch (err) {
-        console.error(`⚠️ 通知エラー（戦績 user: ${userId}）：`, err);
+        console.error(`❌ remind 通知エラー: user=${userId}`, err);
       }
     }
   }
 
-  // ランクマリマインダー（次のパートに続く）
   const ranks = loadJSON(RANK_REMINDER_FILE);
   for (const userId in ranks) {
     const data = ranks[userId];
     const { hour: targetHour, channelId, lastSent } = data;
     const nowDate = now.toDateString();
+
+    console.log(`🔍 rank チェック: user=${userId} 設定=${targetHour}, sent=${lastSent}`);
 
     if (hour === targetHour && minute === 0 && lastSent !== nowDate) {
       try {
@@ -165,34 +122,61 @@ cron.schedule('* * * * *', async () => {
             new ButtonBuilder().setCustomId('rank参加').setLabel('✅ 参加').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('rank不参加').setLabel('❌ 不参加').setStyle(ButtonStyle.Danger)
           );
-
-        const message = await channel.send({
-          content: `@everyone 本日のランクマに参加しますか？`,
-          components: [row]
-        });
-
-        // 3時間後に集計
-        setTimeout(async () => {
-          const record = participationMap.get(message.id);
-          if (!record) return;
-
-          const yesList = [...record.yes].map(id => `<@${id}>`).join('\n') || '（なし）';
-          const noList = [...record.no].map(id => `<@${id}>`).join('\n') || '（なし）';
-          await channel.send(
-            `✅ **ランクマ参加状況（集計結果）**\n\n【参加】\n${yesList}\n\n【不参加】\n${noList}`
-          );
-          participationMap.delete(message.id);
-        }, 3 * 60 * 60 * 1000); // 3時間
-
-        ranks[userId].lastSent = nowDate;
-        saveJSON(RANK_REMINDER_FILE, ranks);
-      } catch (err) {
-        console.error(`⚠️ 通知エラー（ランクマ user: ${userId}）：`, err);
+          const message = await channel.send({
+            content: `@everyone 本日のランクマに参加しますか？`,
+            components: [row]
+          });
+  
+          console.log(`✅ rank 通知送信成功: user=${userId} → channel=${channelId}`);
+  
+          const participationMap = new Map();
+          participationMap.set(message.id, { yes: new Set(), no: new Set() });
+  
+          client.on(Events.InteractionCreate, async interaction => {
+            if (!interaction.isButton()) return;
+            const choice = interaction.customId;
+            const uid = interaction.user.id;
+            const record = participationMap.get(interaction.message.id);
+            if (!record) return;
+  
+            if (choice === 'rank参加') {
+              record.yes.add(uid);
+              record.no.delete(uid);
+            } else {
+              record.no.add(uid);
+              record.yes.delete(uid);
+            }
+  
+            await interaction.reply({
+              content: `✅ 「${choice === 'rank参加' ? '参加' : '不参加'}」として記録しました！`,
+              ephemeral: true
+            });
+          });
+  
+          // 3時間後に集計
+          setTimeout(async () => {
+            const record = participationMap.get(message.id);
+            if (!record) return;
+  
+            const yesList = [...record.yes].map(id => `<@${id}>`).join('\n') || '（なし）';
+            const noList = [...record.no].map(id => `<@${id}>`).join('\n') || '（なし）';
+            await channel.send(
+              `✅ **ランクマ参加状況（集計結果）**\n\n【参加】\n${yesList}\n\n【不参加】\n${noList}`
+            );
+            participationMap.delete(message.id);
+            console.log(`📊 集計完了: message=${message.id}`);
+          }, 3 * 60 * 60 * 1000); // 3時間
+  
+          ranks[userId].lastSent = nowDate;
+          saveJSON(RANK_REMINDER_FILE, ranks);
+        } catch (err) {
+          console.error(`❌ rank 通知エラー: user=${userId}`, err);
+        }
       }
     }
-  }
-});
-
-client.login(process.env.BOT_TOKEN);
-client.on('error', console.error);
-process.on('unhandledRejection', console.error);
+  });
+  
+  client.login(process.env.BOT_TOKEN);
+  client.on('error', console.error);
+  process.on('unhandledRejection', console.error);
+  
