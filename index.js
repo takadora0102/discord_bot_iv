@@ -10,7 +10,8 @@ app.listen(port, () => console.log(`Server running on port ${port}`));
 
 const DATA_FILE = './data.json';
 const REMINDER_FILE = './reminder.json';
-const RANK_REMINDER_FILE = '/etc/secrets/rank_reminder.json';  // Secret File対応
+const RANK_REMINDER_FILE = './rank_reminder.json';
+
 
 function loadData() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE)); } catch { return {}; }
