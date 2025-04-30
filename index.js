@@ -50,53 +50,6 @@ client.on(Events.InteractionCreate, async interaction => {
     });
   }
 
-  else if (interaction.commandName === 'record') {
-    if (!data[userId]) {
-      await interaction.reply({ content: '⚠️ まだ初期登録がされていません。まず /register を使ってください！', ephemeral: true });
-      return;
-    }
-    const w1 = interaction.options.getInteger('wins_today');
-    const l1 = interaction.options.getInteger('losses_today');
-    const d1 = interaction.options.getInteger('draws_today');
-    const goal1 = interaction.options.getNumber('goal_win_rate1');
-    const goal2 = interaction.options.getNumber('goal_win_rate2');
-    const u = data[userId];
-    u.W += w1; u.L += l1; u.D += d1;
-    u.M = u.W + u.L + u.D;
-    u.P = u.W / (u.W + u.L);
-    function calcNeededWins(goal) {
-      const total = u.W + u.L;
-      const needed = Math.ceil((goal * total - u.W) / (1 - goal));
-      return needed > 0 ? needed : 0;
-    }
-    const needed1 = calcNeededWins(goal1);
-    const needed2 = calcNeededWins(goal2);
-    saveJSON(DATA_FILE, data);
-    await interaction.reply({
-      content:
-        `✅ 戦績を更新しました！\n\n📊 成績:\n勝: ${u.W} 負: ${u.L} 分: ${u.D} 合計: ${u.M}\n勝率: ${(u.P * 100).toFixed(2)}%\n\n` +
-        `🎯 ${goal1 * 100}%までに必要勝利数: ${needed1}\n🎯 ${goal2 * 100}%までに必要勝利数: ${needed2}`,
-      ephemeral: true
-    });
-  }
-  else if (interaction.commandName === 'profile') {
-    const u = data[userId];
-    if (!u) {
-      await interaction.reply({ content: '⚠️ データがありません。まず /register を実行してください。', ephemeral: true });
-      return;
-    }
-    await interaction.reply({
-      content: `📊 あなたの戦績：\n勝: ${u.W} 負: ${u.L} 分: ${u.D} 合計: ${u.M}\n勝率: ${(u.P * 100).toFixed(2)}%`,
-      ephemeral: true
-    });
-  }
-
-  else if (interaction.commandName === 'reset') {
-    delete data[userId];
-    saveJSON(DATA_FILE, data);
-    await interaction.reply({ content: '🗑️ 戦績データをリセットしました。', ephemeral: true });
-  }
-
   else if (interaction.commandName === 'remindset') {
     const hour = interaction.options.getInteger('hour');
     const channel = interaction.options.getChannel('channel') || interaction.channel;
@@ -110,6 +63,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     reminders[userId] = { hour: (hour - 9 + 24) % 24, channelId: channel.id };
+    console.log("✅ /remindset 保存直前データ:", reminders);  // ← ログ追加！
     saveJSON(REMINDER_FILE, reminders);
     await interaction.reply({
       content: `✅ 毎日 ${hour}:00 に ${channel.name} で戦績リマインダー通知を送信します！`,
@@ -130,6 +84,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     ranks[userId] = { hour: (hour - 9 + 24) % 24, channelId: channel.id, sentToday: false };
+    console.log("✅ /rankremindset 保存直前データ:", ranks);  // ← ログ追加！
     saveJSON(RANK_REMINDER_FILE, ranks);
     await interaction.reply({
       content: `✅ 毎日 ${hour}:00 に ${channel.name} でランクマ参加アンケートを送信します！`,
@@ -195,7 +150,7 @@ cron.schedule('* * * * *', async () => {
     }
   }
 
-  // ランクマリマインダー
+  // ランクマリマインダー（次のパートに続く）
   const ranks = loadJSON(RANK_REMINDER_FILE);
   for (const userId in ranks) {
     const data = ranks[userId];
